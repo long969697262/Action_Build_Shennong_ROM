@@ -3,47 +3,76 @@ on:
   workflow_dispatch:
     inputs:
       URL:
-        description: "移植包下载地址"
+        description: '移植包下载地址'
         required: true
-        default: 'https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS2.0.16.0.VOBCNXM/haotian-ota_full-OS2.0.16.0.VOBCNXM-user-15.0-162fb533b9.zip'
+        default: 'https://example.com/path/to/your/port_package.zip'  # 请替换为实际地址
       VENDOR_URL:
-        description: "底包下载地址"
+        description: '底包下载地址'
         required: true
-        default: 'https://bkt-sgp-miui-ota-update-alisgp.oss-ap-southeast-1.aliyuncs.com/OS1.0.5.0.TJACNXM/miui_CMI_OS1.0.5.0.TJACNXM_64cdfa3fe5_13.0.zip'
+        default: 'https://example.com/path/to/your/vendor_package.zip'  # 请替换为实际地址
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ROM_NAME: shennong_custom_rom  # 自定义ROM名称
+      GITHUB_ASSETS_DIR: ${{ github.workspace }}/GithubRelease  # GitHub资产目录
     steps:
       - name: 最大化构建环境
-        uses: easimon/maximize-build-space@master
+        uses: easimon/maximize-build-space@v1  # 使用稳定版本
         with:
           swap-size-mb: 8192
           root-reserve-mb: 4096
           temp-reserve-mb: 4096
-          remove-dotnet: 'true'
-          remove-android: 'true'
-          remove-haskell: 'true'
+          remove-dotnet: true
+          remove-android: true
+          remove-haskell: true
+
       - name: 检出仓库文件
-        uses: actions/checkout@main
+        uses: actions/checkout@v3  # 使用稳定版本
+
+      - name: 设置构建环境变量
+        run: |
+          echo "ROM_VERSION=$(date +%Y%m%d%H%M)" >> $GITHUB_ENV  # 示例：使用当前时间作为ROM版本
+          # 您可以在这里添加更多环境变量的设置，如ROM_DESCRIPTION等
+
+      - name: 下载并解压移植包和底包
+        run: |
+          mkdir -p ${{ env.GITHUB_ASSETS_DIR }}/downloads
+          curl -L -o ${{ env.GITHUB_ASSETS_DIR }}/downloads/port_package.zip "${{ github.event.inputs.URL }}"
+          curl -L -o ${{ env.GITHUB_ASSETS_DIR }}/downloads/vendor_package.zip "${{ github.event.inputs.VENDOR_URL }}"
+          unzip -o ${{ env.GITHUB_ASSETS_DIR }}/downloads/port_package.zip -d ${{ github.workspace }}/port_package
+          unzip -o ${{ env.GITHUB_ASSETS_DIR }}/downloads/vendor_package.zip -d ${{ github.workspace }}/vendor_package
+
       - name: 构建 ROM
         run: |
-          sudo bash "$GITHUB_WORKSPACE"/make.sh "${{ github.event.inputs.URL }}" "${{ github.event.inputs.VENDOR_URL }}" "$GITHUB_ENV" "$GITHUB_WORKSPACE"
-      - name: 处理 ROM
+          # 假设您的构建脚本位于仓库的根目录，并且接受必要的参数
+          bash ${{ github.workspace }}/make.sh "${{ github.workspace }}/port_package" "${{ github.workspace }}/vendor_package"
+          # 注意：确保make.sh脚本能够正确处理传入的参数，并设置必要的环境变量
+
+      - name: 处理 ROM 文件
         run: |
-          mkdir -p "$GITHUB_WORKSPACE"/GithubRelease
-          cd "$GITHUB_WORKSPACE"/GithubRelease
-          sudo split -b 1536M -d "$GITHUB_WORKSPACE"/zip/"${{ env.rom_name }}" "${{ env.rom_name }}"
-          cd "$GITHUB_WORKSPACE"
-          touch file.log
-          echo -e "底包版本: ${{ env.vendor_os_version }}\n底包安全补丁版本: ${{ env.vendor_security_patch }}\n底包基线版本: ${{ env.vendor_base_line}}\n\n移植包版本: ${{ env.port_os_version }}\n移植包安全补丁版本: ${{ env.port_security_patch }}\n移植包基线版本: ${{ env.port_base_line }}" > file.log
+          mkdir -p ${{ env.GITHUB_ASSETS_DIR }}
+          cp ${{ github.workspace }}/output/${{ env.ROM_NAME }}.zip ${{ env.GITHUB_ASSETS_DIR }}/
+          sudo split -b 1536M -d ${{ env.GITHUB_ASSETS_DIR }}/${{ env.ROM_NAME }}.zip ${{ env.GITHUB_ASSETS_DIR }}/${{ env.ROM_NAME }}_part_
+
+      - name: 准备发布日志
+        run: |
+          echo -e "ROM 名称: ${{ env.ROM_NAME }}\nROM 版本: ${{ env.ROM_VERSION }}\n底包信息: 请在此处添加底包的具体信息（可能需要从脚本或文件中提取）\n移植包信息: 请在此处添加移植包的具体信息（同样可能需要从脚本或文件中提取）" > ${{ env.GITHUB_ASSETS_DIR }}/release_notes.txt
+
       - name: 上传到 Github Release
-        uses: ncipollo/release-action@main
+        uses: ncipollo/release-action@v1  # 使用稳定版本
         with:
-          artifacts: ${{ github.workspace }}/GithubRelease/*
-          name: "${{ env.port_os_version }}"
-          tag: "${{ env.port_os_version }}"
-          bodyFile: "${{ github.workspace }}/file.log"
+          artifacts: ${{ env.GITHUB_ASSETS_DIR }}/*
+          name: "${{ env.ROM_NAME }} v${{ env.ROM_VERSION }}"
+          tag: "v${{ env.ROM_VERSION }}"
+          bodyFile: ${{ env.GITHUB_ASSETS_DIR }}/release_notes.txt
           allowUpdates: true
           artifactErrorsFailBuild: true
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 可选：清理构建环境
+      - name: 清理工作区
+        if: always()  # 无论构建成功还是失败，都执行清理
+        run: |
+          rm -rf ${{ github.workspace }}/port_package ${{ github.workspace }}/vendor_package ${{ env.GITHUB_ASSETS_DIR }}/downloads
