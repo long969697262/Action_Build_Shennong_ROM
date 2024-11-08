@@ -71,8 +71,4 @@ jobs:
           artifactErrorsFailBuild: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 可选：清理构建环境
-      - name: 清理工作区
-        if: always()  # 无论构建成功还是失败，都执行清理
-        run: |
-          rm -rf ${{ github.workspace }}/port_package ${{ github.workspace }}/vendor_package ${{ env.GITHUB_ASSETS_DIR }}/downloads
+    
